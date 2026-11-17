@@ -859,6 +859,10 @@ const threadSendCommand = Command.make("send", {
   ...projectLocationFlags,
   thread: threadArgument,
   message: messageArgument,
+  freshContext: Flag.Boolean("fresh-context").pipe(
+    Flag.withDescription("Start the agent without the thread's earlier context, like /clear."),
+    Flag.withDefault(false),
+  ),
   wait: waitFlag,
   json: jsonFlag,
 }).pipe(
@@ -876,7 +880,12 @@ const threadSendCommand = Command.make("send", {
           const followWakes = flags.wait ? yield* threadIsIdle(tools, threadId) : false;
           const sent = yield* tools.call(
             "t3_thread_send",
-            { threadId, message, mode: "queue" },
+            {
+              threadId,
+              message,
+              mode: "queue",
+              ...(flags.freshContext ? { freshContext: true } : {}),
+            },
             OrchestratorMcpThreadSendResult,
           );
           if (flags.wait) {

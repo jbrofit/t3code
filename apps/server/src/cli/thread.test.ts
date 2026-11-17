@@ -138,6 +138,70 @@ it.effect(
     ),
 );
 
+it.effect("send requests fresh context only when --fresh-context is set", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-thread-send-" });
+    yield* persistServerRuntimeState({
+      path: path.join(baseDir, "userdata", "server-runtime.json"),
+      state: yield* makePersistedServerRuntimeState({
+        config: { host: "127.0.0.1", devUrl: undefined },
+        port: 3_773,
+      }),
+    });
+    const calls: Array<{ tool: string; args: unknown }> = [];
+    const result = {
+      threadId,
+      messageId: "message-1",
+      runId,
+      status: "queued",
+      delivery: "queued",
+    };
+    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
+      Effect.succeed({
+        call: (tool, args) => {
+          calls.push({ tool, args });
+          return Effect.succeed({ structuredContent: result });
+        },
+      }),
+    );
+
+    for (const extraFlags of [[], ["--fresh-context"]]) {
+      yield* Command.runWith(threadCommand, { version: "0.0.0" })([
+        "send",
+        threadId,
+        "Inspect this project",
+        "--json",
+        "--base-dir",
+        baseDir,
+        ...extraFlags,
+      ]);
+      assert.strictEqual((yield* TestConsole.logLines).at(-1), JSON.stringify(result));
+    }
+    assert.deepStrictEqual(calls, [
+      {
+        tool: "t3_thread_send",
+        args: { threadId, message: "Inspect this project", mode: "queue" },
+      },
+      {
+        tool: "t3_thread_send",
+        args: { threadId, message: "Inspect this project", mode: "queue", freshContext: true },
+      },
+    ]);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        NetService.layer,
+        ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_PORT: "3773" } })),
+      ),
+    ),
+  ),
+);
+
 it.effect("does not sign in to whatever took over a dead server's port", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
